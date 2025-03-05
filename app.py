@@ -155,6 +155,21 @@ def get_timeout(file_size=None):
             return (10, 30)
     return (10, 180)
 
+def update_md_image_paths(md_text, image_folder_path):
+    """Update image paths in markdown text to preserve original paths"""
+    def replace_path(match):
+        img_path = match.group(2)
+        if img_path.startswith('images/'):
+            # Keep the path as is, but ensure it points to the correct location
+            # This assumes the images folder is in the same directory as the app
+            image_name = os.path.basename(img_path)
+            # Just return the original match, preserving the image path
+            return match.group(0)
+        return match.group(0)
+    
+    pattern = r'!\[(.*?)\]\((images/[^)]+)\)'
+    return re.sub(pattern, replace_path, md_text)
+
 def download_and_read_full_md(zip_url):
     """Download and extract markdown content from zip file"""
     try:
@@ -173,7 +188,16 @@ def download_and_read_full_md(zip_url):
         with open(zip_path, 'wb') as f:
             f.write(resp.content)
         
-        # Extract the zip file
+        # Extract the zip file to a persistent location
+        # Create an "output" directory if it doesn't exist
+        output_dir = os.path.join(os.getcwd(), "output")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Create a timestamped directory for this extraction
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        extract_dir = os.path.join(output_dir, f"extract_{timestamp}")
+        os.makedirs(extract_dir, exist_ok=True)
+        
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             md_file_name = None
             for f_name in zip_ref.namelist():
@@ -185,50 +209,21 @@ def download_and_read_full_md(zip_url):
                 shutil.rmtree(temp_dir)
                 return "Lỗi: Không tìm thấy file .md trong gói kết quả!"
             
-            zip_ref.extractall(temp_dir)
+            # Extract to the persistent location
+            zip_ref.extractall(extract_dir)
         
         # Read the markdown file
-        md_path = os.path.join(temp_dir, md_file_name)
+        md_path = os.path.join(extract_dir, md_file_name)
         with open(md_path, 'r', encoding='utf-8') as f:
             md_text = f.read()
         
-        # Process images in the markdown
-        images_dir = os.path.join(temp_dir, 'images')
-        if os.path.exists(images_dir):
-            md_text = update_md_image_paths(md_text, images_dir)
-        
-        # Clean up the temp directory
+        # Clean up the temp download directory
         shutil.rmtree(temp_dir)
         
         return md_text
     
     except Exception as e:
         return f"Lỗi: Không thể xử lý file ZIP: {str(e)}"
-
-def update_md_image_paths(md_text, image_folder_path):
-    """Update image paths in markdown text"""
-    def replace_path(match):
-        img_path = match.group(2)
-        if img_path.startswith('images/'):
-            image_name = os.path.basename(img_path)
-            img_file_path = os.path.join(image_folder_path, image_name)
-            
-            if os.path.exists(img_file_path):
-                # Convert image to base64 for embedding
-                with open(img_file_path, "rb") as img_file:
-                    img_data = base64.b64encode(img_file.read()).decode()
-                
-                # Get image format from filename
-                img_format = os.path.splitext(image_name)[1][1:].lower()
-                if img_format == 'jpg':
-                    img_format = 'jpeg'
-                
-                return f'![{match.group(1)}](data:image/{img_format};base64,{img_data})'
-        
-        return match.group(0)
-    
-    pattern = r'!\[(.*?)\]\((images/[^)]+)\)'
-    return re.sub(pattern, replace_path, md_text)
 
 def convert_tables_to_md(text):
     """Convert HTML tables to markdown format"""
@@ -430,6 +425,7 @@ def upload_and_parse_pdf(pdf_data, mineru_token, progress_callback=None):
                             if not full_zip_url:
                                 return "Không tìm thấy link kết quả!"
                             
+                            # Extract and return the markdown content
                             md_text = download_and_read_full_md(full_zip_url)
                             
                             if md_text.startswith("Lỗi:"):
